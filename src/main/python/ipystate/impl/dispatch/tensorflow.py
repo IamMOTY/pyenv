@@ -105,6 +105,30 @@ class TensorflowDispatcher(Dispatcher):
             os.remove(path)
         json_data = json.dumps(data)
         return self._make_session, (json_data, saver.as_saver_def(), sess.graph)
+    
+    def _reduce_tf_collective_all_reduce(self, car):
+        delattr(car, '_pool')
+        print(str(car))
+        return self._make_tf_collective_all_reduce, (car,)
+
+    
+
+    def _reduce_strategy_extended_v2(self, strategy_extended_v2):
+        strategy_extended_v2._container_strategy_weakref = strategy_extended_v2._container_strategy_weakref()
+        return self._make_strategy_extended_v2, (strategy_extended_v2,)
+
+    def _make_strategy_extended_v2(data):
+        # data._container_strategy_weakref = weakref.ref(data._container_strategy_weakref)
+        return data
+
+    def _make_tf_collective_all_reduce(data):
+        setattr(data._extended._collective_ops, '_pool', multiprocessing.pool.ThreadPool(len(data._extended._collective_ops._devices)))
+        return data
+
+    def _reduce_mirrored_strategy(self, strategy):
+        delattr(strategy._extended._collective_ops, '_pool')
+        strategy._extended._container_strategy_weakref = strategy._extended._container_strategy_weakref() 
+        return _make_tf_collective_all_reduce, (strategy,)
 
     def register(self, dispatch):
         dispatch[tf.Tensor] = self._reduce_tf_tensor
@@ -114,6 +138,9 @@ class TensorflowDispatcher(Dispatcher):
         dispatch[tf.Operation] = self._reduce_tf_op
         dispatch[tf.keras.Model] = self._reduce_tf_model
         dispatch[tf.keras.Sequential] = self._reduce_tf_model
+        dispatch[tf.distribute.MirroredStrategy] = self._reduce_mirrored_strategy
+        dispatch[tf.distribute.cross_device_ops_lib.CollectiveAllReduce] = self._reduce_tf_collective_all_reduce
+        dispatch[tf.distribute.distribute_lib.StrategyExtendedV2] = self._reduce_strategy_extended_v2
         if version.parse('2.0.0') <= version.parse(tf.__version__):
             from tensorflow.python.ops.variable_scope import _VariableScopeStore
             dispatch[_VariableScopeStore] = self._reduce_without_args(_VariableScopeStore)
